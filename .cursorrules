@@ -1,0 +1,52 @@
+# YouTube Analyzer - Cursor Rules
+
+## Project Context
+Multi-agent system for YouTube brand analysis. Uses LangChain, TypeScript, Express.
+Interview project for Plot Technologies (Feb 26, 2026).
+
+## Code Style
+- TypeScript strict mode
+- Functional programming style preferred
+- Clear, descriptive variable names
+- Comments for complex logic only
+
+## Architecture Patterns
+- Agents in `server/agents/` - use LangChain createAgent
+- Tools in `server/tools/` - use LangChain tool() wrapper
+- Utils in `server/utils/` - pure functions, no side effects
+- Hard-coded data fetching functions (not agents)
+
+## Agent Design
+- Agent 1 (Analyst): Has tools, does analysis
+- Agent 2 (Evaluator): No tools, reviews output
+- Always use brand_knowledge tool for brand context
+- System prompts should be clear and specific
+
+## Error Handling
+- Validate inputs before processing
+- Use try/catch for async operations
+- Return meaningful error messages
+- Log errors to console
+
+## Database/Caching
+- Redis for session storage (24hr TTL)
+- Pinecone for RAG (512 dimensions, text-embedding-3-small)
+- Use session:{sessionId}:* pattern for Redis keys
+
+## Import Style
+- Named imports preferred
+- Group imports: external → langchain → local
+- Use relative paths for local files
+
+## Environment
+- All secrets in .env (never hardcode)
+- Use process.env with checks for undefined
+
+## Testing
+- Manual testing with Postman/curl for now
+- Test each component individually before integration
+
+## Production Considerations
+- Think about: cost, latency, error handling
+- Mention MongoDB upgrade path in comments when relevant
+- Cache to avoid re-processing same videos
