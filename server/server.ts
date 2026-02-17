@@ -9,6 +9,7 @@ import { fetchComments, fetchStats } from './utils/fetchAudience.js';
 import { embedAndStore } from './tools/brand-knowledge.js';
 import { runAnalyst } from './agents/analyst.js';
 import { runEvaluator } from './agents/evaluator.js';
+import { createSession } from './utils/redis.js';
 
 const app = express()
 app.use(express.json())
@@ -49,9 +50,11 @@ app.post('/api/analyze', async (req: Request, res: Response) => {
     if (!analysis){
        return res.status(500).send('internal error')
     }
+
     const formattedAnalysis = analysis                                                                                                     
       .map(msg => `[${msg.type}]: ${msg.content}`)
       .join('\n\n');
+
 
     const a2 = performance.now();
     const evaluation = await runEvaluator(brandUrl, formattedAnalysis)
@@ -61,9 +64,12 @@ app.post('/api/analyze', async (req: Request, res: Response) => {
         return res.status(500).send('internal error')
      }
 
-     const response = evaluation.output
+     const finalAnalysis = evaluation.output
      
-     return res.status(200).send(response)
+     const dataToCache = {brandUrl, videoUrl, videoId, finalAnalysis, chunkedText, comments, stats }
+     const id = await createSession(dataToCache)
+
+     return res.status(200).send({id, finalAnalysis})
 
 })
 
