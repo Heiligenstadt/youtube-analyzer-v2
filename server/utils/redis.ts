@@ -10,6 +10,13 @@ interface sessionInput {
         stats: object
 }
 
+interface SessionMeta {
+    brandUrl: string,
+    videoUrl: string,
+    videoId: string,
+    analyzedAt: string
+}
+
 export const createSession = async (analystOutput: sessionInput ) => {
     const id = crypto.randomUUID();
     const {brandUrl, videoUrl, videoId, finalAnalysis, chunkedText, comments, stats} = analystOutput
@@ -41,15 +48,18 @@ export const getSession = async (id: string) => {
     pipe.get(`session:${id}:meta`);
     pipe.get(`session:${id}:insights`);
     pipe.get(`session:${id}:data`);
-    const [meta, insights, data] = await pipe.exec();
+    pipe.lrange(`session:${id}:chat`, 0, -1);
+    const [meta, insights, data, chat] = await pipe.exec();
+    // console.log('📈meta:', meta, 'insights:', insights, 'data:', data, 'chat:', chat);   
 
     if (!meta || !insights || !data){
         return null;
     }
 
-    const parsedMeta = JSON.parse(meta as string);
-    const parsedData = JSON.parse(data as string);
-    return {parsedMeta, parsedData, insights}
+    const parsedChat = Array.isArray(chat)                                                                                                                                                         
+      ? chat.map(msg => typeof msg === 'string' ? JSON.parse(msg) : msg)
+      : [];
+    return {meta: meta as SessionMeta, data, insights: insights as string, parsedChat}
 
    }catch(error){
     console.error('there was an error retrieving cached data', error)
@@ -57,5 +67,26 @@ export const getSession = async (id: string) => {
    }
 }
 
+export const updateChatHistory = async (id: string, userMessage?: string, agentResponse?: string) => {
+
+    try{
+    if (!id){
+        throw new Error('no session ID provided')
+    }
+    if (!userMessage && !agentResponse){
+       return false
+    }
+    await redis.rpush(
+   `session:${id}:chat`,
+      JSON.stringify({ role: 'user', content: userMessage }),
+      JSON.stringify({ role: 'assistant', content: agentResponse })
+    )
+
+    return true;
+}catch(error){
+    console.error('there was an error updating chat history', error)
+    return false;
+   }
+}
 
 

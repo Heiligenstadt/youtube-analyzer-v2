@@ -7,9 +7,10 @@ import { validateUrlExistence } from './utils/validation.js';
 import { fetchTranscriptChunks } from './utils/fetchTranscript.js';
 import { fetchComments, fetchStats } from './utils/fetchAudience.js';
 import { embedAndStore } from './tools/brand-knowledge.js';
-import { runAnalyst } from './agents/analyst.js';
+import { runAnalyst} from './agents/analyst.js';
+import {runChat } from './agents/chat.js'
 import { runEvaluator } from './agents/evaluator.js';
-import { createSession } from './utils/redis.js';
+import { createSession, getSession, updateChatHistory} from './utils/redis.js';
 
 const app = express()
 app.use(express.json())
@@ -21,8 +22,8 @@ app.get('/', (req: Request, res: Response) => {
 
 app.post('/api/analyze', async (req: Request, res: Response) => {
 
-    const videoUrl = req.body.videoUrl;
-    const brandUrl = req.body.brandUrl;
+    const {videoUrl} = req.body;
+    const {brandUrl} = req.body;
     await embedAndStore(brandUrl)
     //validate video Url
     const videoObj = await validateUrlExistence(videoUrl)
@@ -51,9 +52,7 @@ app.post('/api/analyze', async (req: Request, res: Response) => {
        return res.status(500).send('internal error')
     }
 
-    const formattedAnalysis = analysis                                                                                                     
-      .map(msg => `[${msg.type}]: ${msg.content}`)
-      .join('\n\n');
+    const formattedAnalysis = analysis.response                                                                                                     
 
 
     const a2 = performance.now();
@@ -72,6 +71,41 @@ app.post('/api/analyze', async (req: Request, res: Response) => {
      return res.status(200).send({id, finalAnalysis})
 
 })
+
+app.post('/api/chat', async (req: Request, res: Response) => {
+    const {sessionId} = req.body
+    const {message} = req.body
+
+    const cachedData = await getSession(sessionId);
+    if (!cachedData){
+        return res.status(404).send('No video data available. Please start over.')
+    }
+
+    const chatHistory = cachedData.parsedChat;
+    const {brandUrl} = cachedData.meta;
+    const data = cachedData.data
+    const {insights} = cachedData
+    
+    const c1 = performance.now(); 
+    const analystResponse = await runChat(data, chatHistory, insights, message, brandUrl)
+    console.log(`💬 chat analyst: ${(performance.now() - c1).toFixed(0)}ms`);      
+    console.log('🐸 analyst reponse', analystResponse)
+
+    const responseText = analystResponse.response
+    if (analystResponse.usedTool ||
+        analystResponse.responseType === 'draft'){
+            const c2 = performance.now();
+            const finalEvaluation = await runEvaluator(brandUrl, responseText, message)
+            console.log(`💬 chat evaluator: ${(performance.now() - c2).toFixed(0)}ms`);
+            console.log('🐽 Evaluator used')
+                await updateChatHistory(sessionId, message, finalEvaluation.output)
+                return res.status(200).send(finalEvaluation.output)
+        }else{
+            await updateChatHistory(sessionId, message, responseText);
+            return res.status(200).send(responseText);
+        }
+})
+
 
 app.listen(port, () => {
   console.log(`Example app listening on port ${port}`)
