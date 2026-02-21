@@ -7,7 +7,11 @@ import { validateUrlExistence } from './utils/validation.js';
 import { fetchTranscriptChunks } from './utils/fetchTranscript.js';
 import { fetchComments, fetchStats } from './utils/fetchAudience.js';
 import { embedAndStore } from './tools/brand-knowledge.js';
-import { runAnalyst} from './agents/analyst.js';
+import { runChunkSummarizer } from './agents/specialists/chunkSummarizer.js';
+import { runCommentCategorizer } from './agents/specialists/commentCategorizer.js';
+import { calculateStats } from './utils/calculateStats.js';
+import { fetchBrandContext } from './utils/fetchBrandContext.js';
+import { runSynthesizer } from './agents/synthesizer.js';
 import {runChat } from './agents/chat.js'
 import { runEvaluator } from './agents/evaluator.js';
 import { createSession, getSession, updateChatHistory} from './utils/redis.js';
@@ -45,25 +49,39 @@ app.post('/api/analyze', async (req: Request, res: Response) => {
         return res.status(400).send('Could not extract information from this video. Please submit another one.')
     }
 
-    const a1 = performance.now();  
-    const analysis = await runAnalyst(chunkedText, comments, stats, brandUrl);
-    console.log(`👨‍💼analyst: ${(performance.now() - a1).toFixed(0)}ms`);
-    if (!analysis){
-       return res.status(500).send('internal error')
+    // Stats are instant — no LLM needed
+    const statsAnalysis = calculateStats(stats!);
+
+    // PARALLEL PHASE — specialists + brand profiler
+    const p1 = performance.now();
+    const [videoSummary, commentAnalysis, brandProfile] = await Promise.all([
+        runChunkSummarizer(chunkedText).then(r => { console.log(`📝 chunk summarizer: ${(performance.now() - p1).toFixed(0)}ms`); return r; }),
+        runCommentCategorizer(comments).then(r => { console.log(`💬 comment categorizer: ${(performance.now() - p1).toFixed(0)}ms`); return r; }),
+        fetchBrandContext(brandUrl).then(r => { console.log(`🏷️ brand profiler: ${(performance.now() - p1).toFixed(0)}ms`); return r; })
+    ]);
+    console.log(`⚡ parallel phase: ${(performance.now() - p1).toFixed(0)}ms`);
+
+    // SYNTHESIS PHASE — no tools, just reasoning
+    const s1 = performance.now();
+    const synthesis = await runSynthesizer(videoSummary, statsAnalysis, commentAnalysis, brandProfile);
+    console.log(`🧠 synthesizer: ${(performance.now() - s1).toFixed(0)}ms`);
+
+    if (!synthesis) {
+        return res.status(500).send('internal error')
     }
 
-    const formattedAnalysis = analysis.response                                                                                                     
+    // EVALUATION PHASE
+    const e1 = performance.now();
+    const evaluation = await runEvaluator(brandUrl, synthesis.response);
+    console.log(`👩‍💻 evaluator: ${(performance.now() - e1).toFixed(0)}ms`);
 
-
-    const a2 = performance.now();
-    const evaluation = await runEvaluator(brandUrl, formattedAnalysis)
-    console.log(`👩‍💻evaluator: ${(performance.now() - a2).toFixed(0)}ms`);
-
-    if (!evaluation){
+    if (!evaluation) {
         return res.status(500).send('internal error')
-     }
+    }
 
-     const finalAnalysis = evaluation.output
+    console.log(`🏁 total: ${(performance.now() - start).toFixed(0)}ms`);
+
+    const finalAnalysis = evaluation.output
      
      const dataToCache = {brandUrl, videoUrl, videoId, finalAnalysis, chunkedText, comments, stats }
      const id = await createSession(dataToCache)

@@ -7,14 +7,18 @@ export const fetchTranscriptChunks = async (videoId: string): Promise<string[] |
             `https://api.supadata.ai/v1/transcript?url=https://youtu.be/${videoId}`,                                                                   
             { headers: { 'x-api-key': process.env.SUPADATA_API_KEY! } }                                                                                  
           );                                                                                                                                             
-          const data = await response.json();                                                                                                            
+          const data = await response.json();
+          if (!data.content) {
+            console.error('Supadata response missing content:', JSON.stringify(data).slice(0, 200));
+            return null;
+          }
           const text = data.content.map((t: { text: string }) => t.text).join(' ');
 
     if (!text){
         throw new Error('there was an error retrieving transcript from video link');
     }
     
-    const chunked = await chunk(text, 1000);
+    const chunked = await chunk(text, 2500);
     return chunked;
 
     }catch(error){
